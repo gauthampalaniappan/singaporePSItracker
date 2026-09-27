@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Singapore PSI</title>
+<link rel="icon" href="data:,">
+<!-- Leaflet: local vendored copy first (offline-first); CDN fallback is injected by script below if needed -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" id="leaflet-css">
+<script src="vendor/leaflet/leaflet.js"></script>
+<style>
+  :root {
+    --bg: rgba(18, 22, 30, 0.94);
+    --fg: #f0f3f7;
+    --muted: #c3cdd9;   /* secondary text: ~10:1 contrast on the dark background */
+    --dim: #a9b6c5;     /* tertiary text: ~7.5:1 */
+    --c-good: #2ecc71;
+    --c-moderate: #3498db;
+    --c-unhealthy: #f1c40f;
+    --c-vunhealthy: #e67e22;
+    --c-hazardous: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0d1016; }
+  body {
+    font: 13px/1.35 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    color: var(--fg);
+    display: flex; align-items: stretch; justify-content: center;
+    overflow: hidden; user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  .widget {
+    width: 100%; max-width: 420px; height: 100%; min-height: 400px;
+    display: flex; flex-direction: column;
+    background: var(--bg);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+  header { padding: 8px 12px 7px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .btns { display: flex; gap: 4px; }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+  .range { font-size: 25px; font-weight: 700; line-height: 1.15; white-space: nowrap; }
+  .range small { font-size: 12.5px; font-weight: 500; color: var(--muted); margin-left: 5px; }
+  .desc { display: inline-block; padding: 2px 9px; border-radius: 11px; font-weight: 700; font-size: 12.5px; color: #111; background: #666; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+  .meta.stale { color: #ffc2b8; }
+  button.hbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.10); color: var(--fg); border: 1px solid rgba(255,255,255,0.20);
+    border-radius: 6px; min-width: 28px; height: 26px; cursor: pointer; padding: 0 4px;
+    font: 600 14px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  button.hbtn:hover { background: rgba(255,255,255,0.20); }
+  button.hbtn:disabled { opacity: .35; cursor: default; }
+  button.hbtn.txt { font-size: 12.5px; letter-spacing: -.3px; }
+  button#refresh.spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* ---- desktop-app (WebView2 host) mode ---- */
+  .app-only { display: none !important; }
+  html.in-app .app-only { display: inline-flex !important; }
+  html.in-app body { background: #12161e; }
+  html.in-app .widget { max-width: none; min-height: 0; border: none; border-radius: 0; box-shadow: none; }
+  button#close:hover { background: #c0392b; border-color: #e74c3c; }
+  #map { flex: 1 1 auto; min-height: 200px; background: #1b1f27; position: relative; }
+  .leaflet-container { background: #1b1f27; font: inherit; }
+  .leaflet-tile-pane { opacity: .72; filter: saturate(.7); }
+  .leaflet-control-attribution { font-size: 10.5px; line-height: 1.4; background: rgba(0,0,0,0.65) !important; color: #c8d0da; }
+  .leaflet-control-attribution a { color: #a8d4ff; }
+  .psi-marker { text-align: center; pointer-events: none; }
+  .psi-dot {
+    width: 42px; height: 42px; border-radius: 50%; margin: 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 16px; color: #111;
+    border: 2px solid rgba(255,255,255,0.9);
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .psi-lbl { display: inline-block; margin-top: 2px; padding: 0 6px; border-radius: 8px; background: rgba(10,12,18,.8); font-size: 12px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px #000; text-transform: capitalize; white-space: nowrap; }
+  .psi-lbl span { color: #dde5ee; font-weight: 500; }
+  #fallback { position: absolute; inset: 0; display: none; padding: 14px; }
+  #fallback .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  footer { padding: 6px 10px 7px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .legend { display: flex; flex-wrap: nowrap; gap: 2px 9px; justify-content: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  .foot-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; margin-top: 4px; }
+  .note { font-size: 12px; color: var(--dim); }
+  label.toggle { font-size: 12px; color: var(--muted); cursor: pointer; align-items: center; gap: 5px; white-space: nowrap; }
+  label.toggle input { margin: 0; width: 13px; height: 13px; accent-color: #3498db; cursor: pointer; }
+  label.toggle.err { color: #ffc2b8; }
+  .meta.hist { color: #ffd166; font-weight: 600; }
+  /* ---- hourly timeline ---- */
+  #timeline { border-top: 1px solid rgba(255,255,255,0.08); padding: 3px 8px 0; }
+  .tl-head { display: flex; justify-content: space-between; align-items: center; min-height: 22px; font-size: 12px; color: var(--dim); padding: 0 2px; }
+  button#nowbtn { display: none; height: 21px; font-size: 12px; font-weight: 700; padding: 0 9px; background: #ffd166; color: #111; border-color: #ffd166; }
+  body.viewing-history button#nowbtn { display: inline-flex; }
+  #tl-strip { display: flex; overflow-x: auto; overflow-y: hidden; cursor: grab; outline: none; padding: 1px 0 3px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.28) transparent; }
+  #tl-strip.dragging { cursor: grabbing; }
+  #tl-strip.kbd:focus { box-shadow: inset 0 0 0 1px #3498db; border-radius: 4px; }
+  #tl-strip::-webkit-scrollbar { height: 6px; }
+  #tl-strip::-webkit-scrollbar-thumb { background: rgba(255,255,255,.28); border-radius: 3px; }
+  .tl-cell { flex: 0 0 31px; display: flex; flex-direction: column; align-items: center; padding: 1px 0 0; border-radius: 4px; cursor: pointer; }
+  .tl-cell:hover { background: rgba(255,255,255,0.09); }
+  .tl-cell.sel { background: rgba(255,209,102,0.20); box-shadow: inset 0 0 0 1px #ffd166; }
+  .tl-cell.latest .tl-hr { color: #fff; }
+  .tl-cell.midnight { border-left: 1px dashed rgba(255,255,255,0.35); border-radius: 0 4px 4px 0; }
+  .tl-cell.missing { cursor: default; opacity: .45; }
+  .tl-val { font-size: 12px; font-weight: 700; line-height: 14px; }
+  .tl-barwrap { height: 24px; width: 17px; display: flex; align-items: flex-end; }
+  .tl-bar { width: 100%; min-height: 2px; border-radius: 2px 2px 0 0; }
+  .tl-hr { font-size: 12px; line-height: 15px; color: var(--muted); }
+  .tl-hr.day { color: #fff; font-weight: 700; }
+  .tl-empty { font-size: 12px; color: var(--dim); padding: 14px 4px; }
+  #debug { display: none; margin-top: 4px; font: 11px/1.3 Consolas, "Cascadia Mono", monospace; color: #ffd98a; overflow-wrap: anywhere; user-select: text; }
+</style>
+</head>
+<body>
+<div class="widget">
+  <header>
+    <div class="row">
+      <h1>Singapore PSI</h1>
+      <div class="btns">
+        <button id="zoomout" class="hbtn txt app-only" title="Smaller text (Ctrl -)">A&minus;</button>
+        <button id="zoomin" class="hbtn txt app-only" title="Larger text (Ctrl +)">A+</button>
+        <button id="refresh" class="hbtn" title="Refresh now">&#x21bb;</button>
+        <button id="minimize" class="hbtn app-only" title="Minimize">&#x2013;</button>
+        <button id="close" class="hbtn app-only" title="Close">&#x2715;</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="range" id="range">--<small>24-hr PSI</small></div>
+      <span class="desc" id="desc">&hellip;</span>
+    </div>
+    <div class="meta" id="meta">Loading&hellip;</div>
+  </header>
+  <div id="map"><div id="fallback"><div class="grid" id="fallback-grid"></div></div></div>
+  <section id="timeline" aria-label="Past hours">
+    <div class="tl-head">
+      <span id="tl-caption" title="Bar height and colour = highest 24-hr PSI of the 5 regions for that hour. Hover or click an hour to view it; drag, scroll or use arrow keys to move.">Past 48 h &middot; highest 24-hr PSI</span>
+      <button id="nowbtn" class="hbtn" title="Back to the latest reading (Esc)">Now &#x25B8;</button>
+    </div>
+    <div id="tl-strip" tabindex="0"><div class="tl-empty">Loading past hours&hellip;</div></div>
+  </section>
+  <footer>
+    <div class="legend">
+      <span title="PSI 0&ndash;50"><i style="background:var(--c-good)"></i>Good</span>
+      <span title="PSI 51&ndash;100"><i style="background:var(--c-moderate)"></i>Moderate</span>
+      <span title="PSI 101&ndash;200"><i style="background:var(--c-unhealthy)"></i>Unhealthy</span>
+      <span title="PSI 201&ndash;300"><i style="background:var(--c-vunhealthy)"></i>V.&nbsp;Unhealthy</span>
+      <span title="PSI 301+"><i style="background:var(--c-hazardous)"></i>Hazardous</span>
+    </div>
+    <div class="foot-row">
+      <div class="note" title="Data: data.gov.sg / NEA">Circle = 24-hr PSI &middot; small = PM2.5</div>
+      <label class="toggle app-only" id="autostart-lbl" title="Start this widget automatically when you sign in to Windows">
+        <input type="checkbox" id="autostart"> Start with Windows
+      </label>
+    </div>
+    <div id="debug"></div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var REFRESH_MS = 15 * 60 * 1000;
+  var CACHE_KEY = 'psiWidget.cache.v1';
+  var SG_CENTER = [1.3521, 103.8198];
+  var REGIONS = ['north', 'west', 'central', 'east', 'south'];
+  // Fallback label locations (same as data.gov.sg region_metadata) in case metadata is missing
+  var DEFAULT_LOC = {
+    north: [1.41803, 103.82], south: [1.29587, 103.82], east: [1.35735, 103.94],
+    west: [1.35735, 103.70], central: [1.35735, 103.82]
+  };
+  var PSI_ENDPOINTS = [
+    { url: 'https://api-open.data.gov.sg/v2/real-time/api/psi', kind: 'v2' },
+    { url: 'https://api.data.gov.sg/v1/environment/psi', kind: 'v1' }
+  ];
+  var PM25_ENDPOINTS = [
+    { url: 'https://api-open.data.gov.sg/v2/real-time/api/pm25', kind: 'v2' },
+    { url: 'https://api.data.gov.sg/v1/environment/pm25', kind: 'v1' }
+  ];
+
+  // NEA PSI bands
+  var BANDS = [
+    { max: 50,  name: 'Good',           color: '#2ecc71' },
+    { max: 100, name: 'Moderate',       color: '#3498db' },
+    { max: 200, name: 'Unhealthy',      color: '#f1c40f' },
+    { max: 300, name: 'Very Unhealthy', color: '#e67e22' },
+    { max: Infinity, name: 'Hazardous', color: '#e74c3c' }
+  ];
+  function band(v) { for (var i = 0; i < BANDS.length; i++) if (v <= BANDS[i].max) return BANDS[i]; return BANDS[BANDS.length - 1]; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var map = null, markerLayer = null;
+
+  // ---------- Map ----------
+  function initMap() {
+    if (typeof window.L === 'undefined') return false;
+    map = L.map('map', {
+      center: SG_CENTER, zoom: 10.5, zoomSnap: 0.25,
+      zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false,
+      boxZoom: false, keyboard: false, dragging: false, touchZoom: false, tap: false,
+      attributionControl: true
+    });
+    addBaseLayer(0);
+    map.attributionControl.setPrefix(false);
+    markerLayer = L.layerGroup().addTo(map);
+    fitMap();
+    window.addEventListener('resize', function () { map.invalidateSize(); fitMap(); });
+    return true;
+  }
+  // Base map: Singapore's official OneMap "Night" tiles (no key needed; SG coverage only).
+  // Falls back to Esri World Dark Gray if OneMap tiles keep failing.
+  var BASEMAPS = [
+    { url: 'https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png',
+      opts: { minZoom: 10, minNativeZoom: 11, maxNativeZoom: 19, maxZoom: 19, detectRetina: false,
+              bounds: [[1.144, 103.535], [1.494, 104.502]],
+              attribution: '<a href="https://www.onemap.gov.sg/" target="_blank">OneMap</a> &copy; contributors | <a href="https://www.sla.gov.sg/" target="_blank">Singapore Land Authority</a>' } },
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      opts: { maxNativeZoom: 16, maxZoom: 19, attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors' } }
+  ];
+  var baseLayer = null;
+  function addBaseLayer(i) {
+    if (baseLayer) map.removeLayer(baseLayer);
+    var bm = BASEMAPS[i], errs = 0, oks = 0;
+    baseLayer = L.tileLayer(bm.url, bm.opts)
+      .on('tileload', function () { oks++; })
+      .on('tileerror', function () {
+        // switch provider only if tiles fail while we are online (offline = expected)
+        if (++errs >= 3 && oks === 0 && navigator.onLine && i + 1 < BASEMAPS.length) addBaseLayer(i + 1);
+      })
+      .addTo(map);
+  }
+  function fitMap() {
+    // Frame the five region markers (not the whole island) so circles + labels don't overlap
+    map.fitBounds([[1.268, 103.665], [1.448, 103.975]], { padding: [2, 2] });
+  }
+
+  function renderMarkers(d) {
+    if (map) {
+      markerLayer.clearLayers();
+      REGIONS.forEach(function (r) {
+        var v = d.psi[r]; if (v == null) return;
+        var loc = d.loc[r] || DEFAULT_LOC[r];
+        var pm = d.pm25 && d.pm25[r] != null ? ' <span>&middot; ' + d.pm25[r] + '</span>' : '';
+        var html = '<div class="psi-marker"><div class="psi-dot" style="background:' + band(v).color + '">' + v +
+                   '</div><div class="psi-lbl">' + r + pm + '</div></div>';
+        L.marker(loc, {
+          icon: L.divIcon({ className: '', html: html, iconSize: [80, 56], iconAnchor: [40, 19] }),
+          interactive: false, keyboard: false
+        }).addTo(markerLayer);
+      });
+    } else {
+      // No Leaflet at all: simple grid fallback
+      $('fallback').style.display = 'block';
+      $('fallback-grid').innerHTML = REGIONS.map(function (r) {
+        var v = d.psi[r]; if (v == null) return '';
+        var pm = d.pm25 && d.pm25[r] != null ? ' <span>&middot; ' + d.pm25[r] + '</span>' : '';
+        return '<div class="psi-marker"><div class="psi-dot" style="background:' + band(v).color + '">' + v +
+               '</div><div class="psi-lbl">' + r + pm + '</div></div>';
+      }).join('');
+    }
+  }
+
+  // ---------- Data ----------
+  // data.gov.sg v2 allows ~6 anonymous requests per 10 s; its 429 replies carry no CORS
+  // header (so they surface as network errors). Space v2 calls >= 2 s apart.
+  var nextV2 = 0;
+  function v2Slot(url) {
+    if (url.indexOf('//api-open.data.gov.sg/') < 0) return Promise.resolve();
+    var now = Date.now(), at = Math.max(now, nextV2);
+    nextV2 = at + 2000;
+    return pause(at - now);
+  }
+  function fetchJson(url, timeoutMs) {
+    return v2Slot(url).then(function () { return fetchJsonNow(url, timeoutMs); });
+  }
+  function fetchJsonNow(url, timeoutMs) {
+    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+    var t = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs || 15000) : null;
+    return fetch(url, { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' from ' + url);
+        return res.json();
+      })
+      .finally(function () { if (t) clearTimeout(t); });
+  }
+
+  // Normalise v1 (snake_case) / v2 (camelCase, wrapped in data) responses
+  function normalise(json, kind) {
+    var root = kind === 'v2' ? (json && json.data) : json;
+    if (!root) throw new Error('Unexpected response shape');
+    var meta = root.regionMetadata || root.region_metadata || [];
+    var item = (root.items || [])[0];
+    if (!item || !item.readings) throw new Error('No readings in response');
+    var loc = {};
+    meta.forEach(function (m) {
+      var l = m.labelLocation || m.label_location;
+      if (l) loc[m.name] = [l.latitude, l.longitude];
+    });
+    return { loc: loc, readings: item.readings, timestamp: item.timestamp,
+             updated: item.updatedTimestamp || item.update_timestamp };
+  }
+
+  function tryEndpoints(list) {
+    var errors = [];
+    var i = 0;
+    function next() {
+      if (i >= list.length) return Promise.reject(new Error(errors.join('; ')));
+      var ep = list[i++];
+      return fetchJson(ep.url).then(function (j) {
+        var n = normalise(j, ep.kind); n.source = ep.url; return n;
+      }).catch(function (e) { errors.push(e.message); return next(); });
+    }
+    return next();
+  }
+
+  function load() {
+    var btn = $('refresh'); btn.classList.add('spin'); btn.disabled = true;
+    return tryEndpoints(PSI_ENDPOINTS).then(function (psiRes) {
+      var psi = psiRes.readings.psi_twenty_four_hourly;
+      if (!psi) throw new Error('psi_twenty_four_hourly missing');
+      var d = { psi: psi, loc: psiRes.loc, timestamp: psiRes.timestamp, source: psiRes.source,
+                pm25: psiRes.readings.pm25_one_hourly || null, fetchedAt: new Date().toISOString() };
+      if (d.pm25) return d;
+      // PM2.5 one-hourly lives in a separate endpoint; optional
+      return tryEndpoints(PM25_ENDPOINTS).then(function (pmRes) {
+        d.pm25 = pmRes.readings.pm25_one_hourly || null; d.pm25Timestamp = pmRes.timestamp; return d;
+      }).catch(function () { return d; });
+    }).then(function (d) {
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (e) {}
+      liveData = d; liveStale = false;
+      mergeLive(d); saveHist();
+      showView(); renderTimeline();
+    }).catch(function (err) {
+      console.warn('PSI fetch failed:', err && err.message);
+      var cached = null;
+      try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch (e) {}
+      if (cached && cached.psi) {
+        liveData = cached; liveStale = true;
+        showView(); renderTimeline();
+      } else {
+        $('desc').textContent = 'No data'; $('desc').style.background = '#777';
+        $('range').innerHTML = '--<small>24-hr PSI</small>';
+        $('meta').textContent = 'Offline / unable to reach data.gov.sg. Will retry automatically.';
+        $('meta').className = 'meta stale';
+      }
+    }).finally(function () { btn.classList.remove('spin'); btn.disabled = false; })
+      .then(function () { return loadHistory(); });
+  }
+
+  // ---------- Hourly history (timeline) ----------
+  var HIST_KEY = 'psiWidget.history.v1';
+  var HIST_HOURS = 48;
+  var HOUR = 3600e3;
+  var liveData = null, liveStale = false, selectedTs = null, previewTs = null;
+  var hist = (function () {
+    try { var h = JSON.parse(localStorage.getItem(HIST_KEY) || 'null'); if (h && h.hours) { h.days = h.days || {}; return h; } } catch (e) {}  // days: {date: {n, at}}
+    return { hours: {}, days: {} };
+  })();
+  function saveHist() { try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch (e) {} }
+  function sgtDate(daysAgo) { return new Date(Date.now() + 8 * HOUR - daysAgo * 24 * HOUR).toISOString().slice(0, 10); }
+  function natMax(psi) {
+    var v = REGIONS.map(function (r) { return psi[r]; }).filter(function (x) { return typeof x === 'number'; });
+    return v.length ? Math.max.apply(null, v) : (typeof psi.national === 'number' ? psi.national : null);
+  }
+  function mergeItems(items, field, key) {
+    var n = 0;
+    (items || []).forEach(function (it) {
+      if (!it || !it.readings || !it.readings[field]) return;
+      var t = Date.parse(it.timestamp); if (isNaN(t)) return;
+      (hist.hours[t] = hist.hours[t] || {})[key] = it.readings[field]; n++;
+    });
+    return n;
+  }
+  function mergeLive(d) {
+    var t = Date.parse(d.timestamp); if (isNaN(t)) return;
+    var h = hist.hours[t] = hist.hours[t] || {};
+    h.psi = d.psi; if (d.pm25) h.pm25 = d.pm25;
+  }
+  // All hourly items for one SGT date: v2 ?date= (following paginationToken if ever present), v1 fallback.
+  function pause(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fetchDayItems(kind, date) {
+    var v2 = 'https://api-open.data.gov.sg/v2/real-time/api/' + kind + '?date=' + date;
+    var v1 = 'https://api.data.gov.sg/v1/environment/' + kind + '?date=' + date;
+    function page(token, acc, n) {
+      return fetchJson(v2 + (token ? '&paginationToken=' + encodeURIComponent(token) : '')).then(function (j) {
+        var d = j && j.data; if (!d || !d.items) throw new Error('bad v2 history response');
+        acc = acc.concat(d.items);
+        return (d.paginationToken && n < 5) ? page(d.paginationToken, acc, n + 1) : acc;
+      });
+    }
+    return page(null, [], 0).catch(function () {
+      return fetchJson(v1).then(function (j) { if (!j || !j.items) throw new Error('bad v1 history response'); return j.items; });
+    });
+  }
+  // Fetch today (every cycle) + the two previous days (once; completed days are cached).
+  var histBusy = false;
+  function loadHistory() {
+    if (histBusy) return Promise.resolve();
+    histBusy = true;
+    var chain = Promise.resolve();
+    [0, 1, 2].forEach(function (ago) {
+      var date = sgtDate(ago);
+      // Past days: skip once complete (24 hourly readings). A partial day (e.g. v1 fallback,
+      // which omits the 00:00 reading) is retried at most once an hour.
+      var dd = hist.days[date];
+      if (ago > 0 && dd && (dd.n >= 24 || Date.now() - dd.at < HOUR)) return;
+      chain = chain.then(function () {
+        return fetchDayItems('psi', date).then(function (items) {
+          var n = mergeItems(items, 'psi_twenty_four_hourly', 'psi');
+          return fetchDayItems('pm25', date).then(function (p) { mergeItems(p, 'pm25_one_hourly', 'pm25'); }, function () {})
+            .then(function () { if (ago > 0) hist.days[date] = { n: n, at: Date.now() }; });
+        }).catch(function (e) { console.warn('history ' + date + ': ' + e.message); });
+      });
+    });
+    return chain.then(function () {
+      var cutoff = Date.now() - 72 * HOUR;
+      Object.keys(hist.hours).forEach(function (k) { if (+k < cutoff) delete hist.hours[k]; });
+      Object.keys(hist.days).forEach(function (k) { if (k < sgtDate(4)) delete hist.days[k]; });
+      saveHist(); renderTimeline(); showView();
+    }).finally(function () { histBusy = false; });
+  }
+  function latestKey() {
+    var ks = Object.keys(hist.hours).map(Number).filter(function (k) { return hist.hours[k].psi; });
+    return ks.length ? Math.max.apply(null, ks) : null;
+  }
+  var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var timeFmt = new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', hour: 'numeric', minute: '2-digit', hour12: true });
+  var dayFmt = new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', weekday: 'short', day: 'numeric', month: 'short' });
+  var tlRendered = false;
+  function renderTimeline() {
+    var strip = $('tl-strip');
+    var latest = latestKey();
+    if (latest == null) { strip.innerHTML = '<div class="tl-empty">Loading past hours&hellip;</div>'; return; }
+    var atEnd = !tlRendered || strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 8;
+    var prevScroll = strip.scrollLeft;
+    // Bars show the trend: scaled between a floor slightly below the period's minimum and its maximum.
+    var start = latest - (HIST_HOURS - 1) * HOUR, vmin = Infinity, vmax = -Infinity, t, h, v, html = '', count = 0;
+    for (t = start; t <= latest; t += HOUR) { h = hist.hours[t]; v = h && h.psi ? natMax(h.psi) : null; if (v != null) { vmin = Math.min(vmin, v); vmax = Math.max(vmax, v); } }
+    var floor = Math.max(0, vmin - Math.max(10, (vmax - vmin) * 0.3)), span = Math.max(1, vmax - floor);
+    for (t = start; t <= latest; t += HOUR) {
+      h = hist.hours[t]; v = h && h.psi ? natMax(h.psi) : null;
+      var sg = new Date(t + 8 * HOUR), hr = sg.getUTCHours();
+      var lbl = hr === 0 ? DAYS[sg.getUTCDay()] : (hr % 12 || 12) + (hr < 12 ? 'a' : 'p');
+      var cls = 'tl-cell' + (hr === 0 ? ' midnight' : '') + (t === latest ? ' latest' : '') + (v == null ? ' missing' : '');
+      var tip = timeFmt.format(t) + ', ' + dayFmt.format(t) + (v == null ? ' \u00b7 no data' : ' \u00b7 highest 24-hr PSI ' + v + ' (' + band(v).name + ')');
+      if (v != null) count++;
+      html += '<div class="' + cls + '"' + (v != null ? ' data-ts="' + t + '"' : '') + ' title="' + tip + '">' +
+        '<div class="tl-val">' + (v == null ? '&ndash;' : v) + '</div>' +
+        '<div class="tl-barwrap">' + (v == null ? '' : '<div class="tl-bar" style="height:' + Math.round(12 + 88 * (v - floor) / span) + '%;background:' + band(v).color + '"></div>') + '</div>' +
+        '<div class="tl-hr' + (hr === 0 ? ' day' : '') + '">' + lbl + '</div></div>';
+    }
+    strip.innerHTML = html;
+    $('tl-caption').innerHTML = 'Past ' + Math.round((latest - start) / HOUR + 1) + ' h &middot; highest 24-hr PSI';
+    strip.setAttribute('data-hours', count);
+    strip.scrollLeft = atEnd ? strip.scrollWidth : prevScroll;
+    tlRendered = true;
+    highlightCells();
+  }
+  function viewTs() { return previewTs != null ? previewTs : selectedTs; }
+  function highlightCells() {
+    var ts = viewTs();
+    [].forEach.call($('tl-strip').querySelectorAll('.tl-cell[data-ts]'), function (c) {
+      c.classList.toggle('sel', ts != null && +c.dataset.ts === ts);
+    });
+  }
+  function histData(ts) {
+    var h = hist.hours[ts];
+    return { psi: h.psi, pm25: h.pm25 || null, loc: (liveData && liveData.loc) || {}, timestamp: new Date(ts).toISOString() };
+  }
+  // Show the selected/previewed hour, or the live reading.
+  function showView() {
+    var ts = viewTs();
+    if (ts != null && hist.hours[ts] && hist.hours[ts].psi) render(histData(ts), 'history');
+    else if (liveData) render(liveData, liveStale ? 'stale' : 'live');
+    document.body.classList.toggle('viewing-history', selectedTs != null);
+    highlightCells();
+  }
+  function selectHour(ts) {
+    selectedTs = (ts === latestKey()) ? null : ts;   // the newest hour == live view
+    previewTs = null;
+    showView();
+  }
+  function goLive() {
+    selectedTs = null; previewTs = null; showView();
+    var s = $('tl-strip'); s.scrollLeft = s.scrollWidth;
+  }
+  function initTimeline() {
+    var strip = $('tl-strip'), drag = null;
+    renderTimeline();
+    $('nowbtn').addEventListener('click', goLive);
+    // Mouse wheel scrolls the strip horizontally (Ctrl+wheel is left for text zoom)
+    strip.addEventListener('wheel', function (e) {
+      if (e.ctrlKey) return;
+      e.preventDefault();
+      strip.scrollLeft += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    }, { passive: false });
+    // Drag to scroll; a click without movement selects the hour
+    strip.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault(); strip.focus({ preventScroll: true });
+      drag = { x: e.clientX, s: strip.scrollLeft, moved: false };
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!drag) return;
+      var dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) > 4) { drag.moved = true; strip.classList.add('dragging'); }
+      if (drag.moved) strip.scrollLeft = drag.s - dx;
+    });
+    document.addEventListener('mouseup', function (e) {
+      if (!drag) return;
+      var moved = drag.moved; drag = null; strip.classList.remove('dragging');
+      if (moved) return;
+      var c = e.target.closest && e.target.closest('.tl-cell[data-ts]');
+      if (c && strip.contains(c)) selectHour(+c.dataset.ts);
+    });
+    // Hover previews an hour; leaving the strip returns to the pinned selection (or live)
+    strip.addEventListener('mouseover', function (e) {
+      if (drag) return;
+      var c = e.target.closest && e.target.closest('.tl-cell[data-ts]');
+      if (!c) return;
+      var ts = +c.dataset.ts;
+      previewTs = (ts === latestKey() && selectedTs == null) ? null : ts;
+      showView();
+    });
+    strip.addEventListener('mouseleave', function () { if (previewTs != null) { previewTs = null; showView(); } });
+    // Keyboard: left/right = previous/next hour, Home/End, Esc = live
+    strip.addEventListener('blur', function () { strip.classList.remove('kbd'); });
+    strip.addEventListener('keydown', function (e) {
+      strip.classList.add('kbd');
+      var keys = Object.keys(hist.hours).map(Number).filter(function (k) { return hist.hours[k].psi; }).sort(function (a, b) { return a - b; });
+      if (!keys.length) return;
+      var cur = selectedTs != null ? selectedTs : keys[keys.length - 1];
+      var i = keys.indexOf(cur), target = null;
+      if (e.key === 'ArrowLeft') target = keys[Math.max(0, i - 1)];
+      else if (e.key === 'ArrowRight') target = keys[Math.min(keys.length - 1, i + 1)];
+      else if (e.key === 'Home') target = keys[Math.max(0, keys.length - HIST_HOURS)];
+      else if (e.key === 'End' || e.key === 'Escape') { e.preventDefault(); goLive(); return; }
+      if (target == null) return;
+      e.preventDefault();
+      selectHour(target);
+      var cell = strip.querySelector('.tl-cell[data-ts="' + target + '"]');
+      if (cell) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && selectedTs != null) goLive(); });
+  }
+
+  // ---------- Rendering ----------
+  var sgtFmt = new Intl.DateTimeFormat('en-SG', {
+    timeZone: 'Asia/Singapore', day: 'numeric', month: 'short',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+  function fmtSGT(iso) {
+    var dt = new Date(iso);
+    return isNaN(dt) ? String(iso) : sgtFmt.format(dt) + ' SGT';
+  }
+
+  function render(d, mode) {
+    var stale = mode === 'stale', history = mode === 'history';
+    var vals = REGIONS.map(function (r) { return d.psi[r]; }).filter(function (v) { return typeof v === 'number'; });
+    if (!vals.length && typeof d.psi.national === 'number') vals = [d.psi.national];
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var bLo = band(lo), bHi = band(hi);
+    $('range').innerHTML = (lo === hi ? lo : lo + '–' + hi) + '<small>24-hr PSI</small>';
+    var desc = $('desc');
+    desc.textContent = bLo === bHi ? bHi.name : bLo.name + ' – ' + bHi.name;
+    desc.style.background = bHi.color;
+    var meta = $('meta');
+    if (history) {
+      meta.textContent = 'Viewing ' + timeFmt.format(new Date(d.timestamp)) + ', ' + dayFmt.format(new Date(d.timestamp)) + ' (historical)';
+      meta.title = 'Press Now (or Esc) to return to the latest reading';
+      meta.className = 'meta hist';
+    } else if (stale) {
+      meta.textContent = 'STALE (offline) · last reading ' + fmtSGT(d.timestamp);
+      meta.title = 'Cached ' + fmtSGT(d.fetchedAt) + ' · will retry automatically';
+      meta.className = 'meta stale';
+    } else {
+      meta.textContent = 'Reading at ' + fmtSGT(d.timestamp) + ' · checked ' + fmtSGT(d.fetchedAt).replace(/^\d+ \w+,? /, '');
+      meta.className = 'meta';
+    }
+    if (mode === 'live') meta.title = 'Source: ' + (d.source || '?');
+    renderMarkers(d);
+    document.body.setAttribute('data-state', mode);
+  }
+
+  // ---------- Desktop host (SingaporePSI.exe / WebView2) ----------
+  var host = (window.chrome && window.chrome.webview) ? window.chrome.webview : null;
+  function send(cmd, arg) { if (host) host.postMessage(JSON.stringify({ cmd: cmd, arg: arg })); }
+  // Called by the Go host via ExecuteScript
+  window.psiHost = {
+    state: function (zoom, dbg, atMin, atMax) {
+      var pct = Math.round(zoom * 100) + '%';
+      $('zoomout').disabled = !!atMin; $('zoomin').disabled = !!atMax;
+      $('zoomout').title = 'Smaller text (Ctrl -) \u00b7 now ' + pct;
+      $('zoomin').title = 'Larger text (Ctrl +) \u00b7 now ' + pct + ' \u00b7 Ctrl 0 = reset';
+      var d = $('debug');
+      d.textContent = dbg || ''; d.style.display = dbg ? 'block' : 'none';
+    },
+    autostart: function (on, err) {
+      $('autostart').checked = !!on;
+      var lbl = $('autostart-lbl');
+      lbl.classList.toggle('err', !!err);
+      lbl.title = err ? ('Could not change setting: ' + err)
+                      : 'Start this widget automatically when you sign in to Windows';
+    }
+  };
+  function initHost() {
+    if (!host) return;
+    document.documentElement.classList.add('in-app');
+    $('close').addEventListener('click', function () { send('close'); });
+    $('minimize').addEventListener('click', function () { send('minimize'); });
+    $('autostart').addEventListener('change', function () { send('autostart', this.checked); });
+    $('zoomin').addEventListener('click', function () { send('zoom', 1); });
+    $('zoomout').addEventListener('click', function () { send('zoom', -1); });
+    // Ctrl + / Ctrl - / Ctrl 0 and Ctrl + mouse wheel -> text size (window resizes with it)
+    document.addEventListener('keydown', function (e) {
+      if (!e.ctrlKey) return;
+      if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') { e.preventDefault(); send('zoom', 1); }
+      else if (e.key === '-' || e.code === 'NumpadSubtract') { e.preventDefault(); send('zoom', -1); }
+      else if (e.key === '0' || e.code === 'Numpad0') { e.preventDefault(); send('zoom', 0); }
+    });
+    var lastWheel = 0;
+    document.addEventListener('wheel', function (e) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      var now = Date.now(); if (now - lastWheel < 180) return; lastWheel = now;
+      send('zoom', e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+    // Drag the frameless window from anywhere except controls/links
+    document.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest('button, a, input, label, #debug, #timeline')) return;
+      e.preventDefault();
+      send('drag');
+    });
+    // Open external links (map attribution) in the default browser instead of inside the widget
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[href]');
+      if (!a) return;
+      e.preventDefault();
+      if (/^https:\/\//i.test(a.href)) send('open', a.href);
+    });
+    document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    send('hello');
+  }
+
+  // ---------- Boot ----------
+  function boot() {
+    initHost();
+    initMap();
+    initTimeline();
+    $('refresh').addEventListener('click', load);
+    window.addEventListener('online', load);
+    load();
+    setInterval(load, REFRESH_MS);
+  }
+
+  if (typeof window.L === 'undefined') {
+    // Local copy missing: try CDN, then boot either way
+    var css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = boot; s.onerror = boot;
+    document.head.appendChild(s);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>
