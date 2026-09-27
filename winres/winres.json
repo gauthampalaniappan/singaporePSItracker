@@ -1,0 +1,47 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": { "0000": "icon.png" }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "identity": { "name": "Personal.SingaporePSIWidget", "version": "1.2.0.0" },
+        "description": "Singapore PSI Widget",
+        "minimum-os": "win10",
+        "execution-level": "as invoker",
+        "ui-access": false,
+        "auto-elevate": false,
+        "dpi-awareness": "per monitor v2",
+        "disable-theming": false,
+        "disable-window-filtering": false,
+        "high-resolution-scrolling-aware": false,
+        "ultra-high-resolution-scrolling-aware": false,
+        "long-path-aware": true,
+        "printer-driver-isolation": false,
+        "gdi-scaling": false,
+        "segment-heap": false,
+        "use-common-controls-v6": true
+      }
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": { "file_version": "1.2.0.0", "product_version": "1.2.0.0" },
+        "info": {
+          "0409": {
+            "Comments": "Desktop widget showing Singapore PSI readings from data.gov.sg (NEA)",
+            "CompanyName": "Gautham Palaniappan",
+            "FileDescription": "Singapore PSI Widget",
+            "FileVersion": "1.2.0.0",
+            "InternalName": "SingaporePSI",
+            "LegalCopyright": "Copyright (c) 2026 Gautham Palaniappan. MIT License. Data: data.gov.sg (NEA). Map: OneMap / SLA.",
+            "OriginalFilename": "SingaporePSI.exe",
+            "ProductName": "Singapore PSI Widget",
+            "ProductVersion": "1.2.0.0"
+          }
+        }
+      }
+    }
+  }
+}
